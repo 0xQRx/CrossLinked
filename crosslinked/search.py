@@ -37,6 +37,69 @@ class Timer(threading.Thread):
         self.running = False
 
 
+class CompanySearch:
+    def __init__(self, domain, conn_timeout=20, proxies=[], jitter=1):
+        self.results = []
+        self.url = 'https://www.google.com/search?q=site:linkedin.com+intext:"{}"&num=1'
+        self.domain = domain
+        self.conn_timeout = conn_timeout
+        self.proxies = proxies
+        self.jitter = jitter
+
+    def search(self):
+        try:
+            url = self.url.format(self.domain, 0)
+            resp = web_request(url, self.conn_timeout, self.proxies)
+            http_code = get_statuscode(resp)
+
+            if http_code != 200:
+                Log.warn('None 200 response, exiting search ({})'.format(http_code))
+                return None
+
+            self.page_parser(resp)
+            
+            sleep(self.jitter)
+            
+            if self.results:
+                company_name = self.results[0]
+                print(company_name)
+                return company_name
+            else:
+                Log.warn('No company name found for domain: {}'.format(self.domain))
+                return None
+                
+        except Exception as e:
+            Log.warn('Search failed: {}'.format(e))
+            return None
+
+    def page_parser(self, resp):
+        for link in extract_links(resp):
+            try:
+                self.results_handler(link)
+                if self.results:  # Stop after finding first company name
+                    break
+            except Exception as e:
+                Log.warn('Failed Parsing: {}- {}'.format(link.get('href'), e))
+
+    def results_handler(self, link):
+        url = str(link.get('href')).lower()
+
+        if not extract_subdomain(url).endswith('linkedin.com'):
+            return False
+        elif 'linkedin.com/company/' not in url:
+            return False
+
+        company_name = self.extract_company_name(link)
+        if company_name:
+            self.results.append(company_name)
+
+    def extract_company_name(self, link):
+        h3_tag = link.find('h3')
+        if h3_tag:
+            return h3_tag.get_text().strip()
+        return None
+
+
 class CrossLinked:
     def __init__(self, search_engine, target, timeout, conn_timeout=3, proxies=[], jitter=0):
         self.results = []
@@ -144,15 +207,47 @@ def get_proxy(proxies):
 
 def get_agent():
     return choice([
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:104.0) Gecko/20100101 Firefox/104.0'
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 12.5; rv:104.0) Gecko/20100101 Firefox/104.0',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15'
+        # Chrome (Windows/macOS/Linux)
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Safari/537.36',
+
+        # Firefox (Windows/macOS/Linux)
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 13.4; rv:126.0) Gecko/20100101 Firefox/126.0',
+        'Mozilla/5.0 (X11; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0',
+
+        # Safari (macOS)
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+
+        # Safari (iOS)
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+
+        # Edge (Chromium-based)
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Safari/537.36 Edg/125.0.2535.67',
+
+        # Chrome on Android
+        'Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Mobile Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Mobile Safari/537.36',
+
+        # Firefox on Android
+        'Mozilla/5.0 (Android 14; Mobile; rv:126.0) Gecko/126.0 Firefox/126.0',
+
+        # Samsung Internet (Android)
+        'Mozilla/5.0 (Linux; Android 13; SM-G998U) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/125.0.6422.113 Mobile Safari/537.36',
+
+        # Brave (Chromium)
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Safari/537.36 Brave/125.1.63.113',
+
+        # Opera (Chromium-based)
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Safari/537.36 OPR/110.0.5100.67',
+
+        # Vivaldi (Chromium-based)
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.113 Safari/537.36 Vivaldi/6.7.3329.25',
+
+        # Tor Browser (based on Firefox)
+        'Mozilla/5.0 (Windows NT 10.0; rv:102.0) Gecko/20100101 Firefox/102.0'
     ])
 
 
